@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Your rule content
+- Use context from spacetimeDB docs @Link https://spacetimedb.com/docs and the package it uses @Link https://github.com/clockworklabs/SpacetimeDB
+- For each line or block of code generated, label them with comments in a detailed way. 
