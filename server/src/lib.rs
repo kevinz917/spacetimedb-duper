@@ -51,7 +51,8 @@ pub struct Player {
     color: String,
     identity: Option<Identity>,
     online: bool,
-    gold: u32, // Amount of gold the player has
+    gold: u32,    // Amount of gold the player has
+    stamina: u32, // Amount of stamina the player has (max 2)
 }
 
 #[spacetimedb::table(name = game, public)]
@@ -97,7 +98,8 @@ pub fn init(ctx: &ReducerContext) {
             color: color.to_string(),
             identity: None,
             online: false,
-            gold: 0, // Initialize gold to 0
+            gold: 0,    // Initialize gold to 0
+            stamina: 0, // Initialize stamina to 0
         });
     }
 
@@ -114,22 +116,27 @@ pub fn init(ctx: &ReducerContext) {
                 tanks: 0,
             };
 
-            // Set initial player positions
+            // Set initial player positions with 5 troops
             match (x, y) {
                 (1, 1) => {
                     tile.owner_color = Some("red".to_string());
+                    tile.troops = 5;
                 }
                 (5, 1) => {
                     tile.owner_color = Some("green".to_string());
+                    tile.troops = 5;
                 }
                 (1, 5) => {
                     tile.owner_color = Some("yellow".to_string());
+                    tile.troops = 5;
                 }
                 (5, 5) => {
                     tile.owner_color = Some("orange".to_string());
+                    tile.troops = 5;
                 }
                 (3, 3) => {
                     tile.owner_color = Some("purple".to_string());
+                    tile.troops = 5;
                 }
                 _ => {}
             }
@@ -201,19 +208,23 @@ pub fn next_turn(ctx: &ReducerContext, _timer: NextTurnTimer) {
             current_index
         );
 
-        // Award 2 gold to the current player if they are online
+        // Award 2 gold and 1 stamina to the current player if they are online
         if let Some(player) = ctx.db.player().color().find(&current_color.to_string()) {
             let player_color = player.color.clone();
             let new_gold = player.gold + 2;
-            // Update player's gold
+            let new_stamina = (player.stamina + 1).min(2); // Cap at 2
+
+            // Update player's gold and stamina
             ctx.db.player().color().update(Player {
                 gold: new_gold,
+                stamina: new_stamina,
                 ..player.clone()
             });
             log::info!(
-                "Awarded 2 gold to player {}. New total: {}",
+                "Awarded 2 gold and 1 stamina to player {}. New totals: gold={}, stamina={}",
                 player_color,
-                new_gold
+                new_gold,
+                new_stamina
             );
 
             // Deal 2 cards to the current player if they are online
@@ -541,6 +552,107 @@ pub fn build_tank(ctx: &ReducerContext, x: u32, y: u32, card_ids: Vec<u32>) -> R
         tanks: tile.tanks + 1,
         ..tile
     });
+
+    Ok(())
+}
+
+/// Moves troops and tanks from one tile to an adjacent tile.
+///
+/// # Arguments
+/// * `ctx` - The reducer context containing database access and sender information
+/// * `from_tile_id` - The ID of the source tile
+/// * `to_tile_id` - The ID of the destination tile
+/// * `troops_to_move` - Number of troops to move
+/// * `tanks_to_move` - Number of tanks to move
+///
+/// # Returns
+/// * `Result<(), String>` - Ok(()) if move succeeds, Err with message if it fails
+///
+/// # Move Rules
+/// 1. Source and destination tiles must be owned by the player
+/// 2. Source and destination tiles must be adjacent
+/// 3. Source tile must have enough troops and tanks to move
+/// 4. Source tile must keep at least 1 troop after the move
+#[spacetimedb::reducer]
+pub fn move_units(
+    ctx: &ReducerContext,
+    from_tile_id: u32,
+    to_tile_id: u32,
+    troops_to_move: u32,
+    tanks_to_move: u32,
+) -> Result<(), String> {
+    // Step 1: Get the current player
+    let player = ctx
+        .db
+        .player()
+        .iter()
+        .find(|p| p.identity == Some(ctx.sender))
+        .ok_or("Player not found")?;
+    let player_color = player.color.clone();
+
+    // Step 2: Get source and destination tiles
+    let from_tile = ctx
+        .db
+        .tile()
+        .tile_id()
+        .find(&from_tile_id)
+        .ok_or("Source tile not found")?;
+    let to_tile = ctx
+        .db
+        .tile()
+        .tile_id()
+        .find(&to_tile_id)
+        .ok_or("Destination tile not found")?;
+
+    // Step 3: Verify ownership of both tiles
+    if from_tile.owner_color.as_ref() != Some(&player_color)
+        || to_tile.owner_color.as_ref() != Some(&player_color)
+    {
+        return Err("You must own both the source and destination tiles".to_string());
+    }
+
+    // Step 4: Verify tiles are adjacent
+    let dx = from_tile.x.abs_diff(to_tile.x);
+    let dy = from_tile.y.abs_diff(to_tile.y);
+    if dx + dy != 1 {
+        return Err("Tiles must be adjacent".to_string());
+    }
+
+    // Step 5: Verify enough units to move
+    if from_tile.troops < troops_to_move {
+        return Err("Not enough troops to move".to_string());
+    }
+    if from_tile.tanks < tanks_to_move {
+        return Err("Not enough tanks to move".to_string());
+    }
+
+    // Step 6: Verify source tile keeps at least 1 troop
+    if from_tile.troops - troops_to_move < 1 {
+        return Err("Source tile must keep at least 1 troop".to_string());
+    }
+
+    // Step 7: Update source tile (remove units)
+    ctx.db.tile().tile_id().update(Tile {
+        troops: from_tile.troops - troops_to_move,
+        tanks: from_tile.tanks - tanks_to_move,
+        ..from_tile
+    });
+
+    // Step 8: Update destination tile (add units)
+    ctx.db.tile().tile_id().update(Tile {
+        troops: to_tile.troops + troops_to_move,
+        tanks: to_tile.tanks + tanks_to_move,
+        ..to_tile
+    });
+
+    log::info!(
+        "Player {} moved {} troops and {} tanks from tile {} to tile {}",
+        player_color,
+        troops_to_move,
+        tanks_to_move,
+        from_tile_id,
+        to_tile_id
+    );
 
     Ok(())
 }
