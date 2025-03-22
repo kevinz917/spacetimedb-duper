@@ -1,8 +1,12 @@
 # spacetimedb-duper
 
-- spacetime delete duper && spacetime publish duper && spacetime logs duper --follow
+Mini port of Duper.gg in SpacetimeDB.
 
-To play
+# To play
+
+spacetime start
+
+spacetime delete duper && spacetime publish duper && spacetime logs duper --follow
 
 spacetime call duper join_game red
 
