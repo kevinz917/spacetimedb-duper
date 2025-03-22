@@ -1,6 +1,6 @@
 use log;
 use rand::Rng;
-use spacetimedb::{reducer, table, Identity, ReducerContext, Table, Timestamp};
+use spacetimedb::{reducer, Identity, ReducerContext, Table};
 use std::time::Duration;
 
 // ------------------------------------------------------------
@@ -154,7 +154,6 @@ pub fn init(ctx: &ReducerContext) {
     // Initialize the deck of cards
     create_new_deck(ctx);
 }
-
 #[reducer]
 pub fn join_game(ctx: &ReducerContext, color: String) {
     // First check if the color is valid
@@ -229,16 +228,16 @@ pub fn next_turn(ctx: &ReducerContext, _timer: NextTurnTimer) {
 
             // Deal 2 cards to the current player if they are online
             for _ in 0..2 {
-                // Find a random card in the deck
-                let available_cards: Vec<Card> = ctx
+                // Get available cards from the deck
+                let mut available_cards: Vec<Card> = ctx
                     .db
                     .card()
                     .iter()
                     .filter(|card| card.owner_color.is_none())
                     .collect();
 
+                // If deck is empty, create a new one
                 if available_cards.is_empty() {
-                    // Deck is empty, create a new deck
                     log::info!("Deck depleted, creating new deck...");
                     // Delete all cards that are in the deck (owner_color is None)
                     for card in ctx
@@ -252,7 +251,7 @@ pub fn next_turn(ctx: &ReducerContext, _timer: NextTurnTimer) {
                     // Create a new deck of cards
                     create_new_deck(ctx);
                     // Get the newly created cards
-                    let available_cards: Vec<Card> = ctx
+                    available_cards = ctx
                         .db
                         .card()
                         .iter()
@@ -260,37 +259,36 @@ pub fn next_turn(ctx: &ReducerContext, _timer: NextTurnTimer) {
                         .collect();
                 }
 
-                if let Some(card) =
-                    available_cards.get(ctx.rng().gen_range(0..available_cards.len()))
-                {
-                    // Deal card to player
-                    let mut card = (*card).clone();
-                    let suit = card.suit.clone();
-                    let value = card.value;
-                    let player_color = player.color.clone();
+                // Now we know we have cards available
+                let card = available_cards
+                    .get(ctx.rng().gen_range(0..available_cards.len()))
+                    .unwrap();
+                let mut card = (*card).clone();
+                let suit = card.suit.clone();
+                let value = card.value;
+                let player_color = player.color.clone();
 
-                    card.owner_color = Some(player_color.clone());
-                    ctx.db.card().card_id().update(card);
+                card.owner_color = Some(player_color.clone());
+                ctx.db.card().card_id().update(card);
 
-                    // Log the dealt card
-                    let value_str = match value {
-                        1 => "Ace",
-                        2 => "2",
-                        3 => "3",
-                        4 => "4",
-                        5 => "5",
-                        6 => "6",
-                        7 => "7",
-                        8 => "8",
-                        9 => "9",
-                        10 => "10",
-                        11 => "Jack",
-                        12 => "Queen",
-                        13 => "King",
-                        _ => "Unknown",
-                    };
-                    log::info!("Dealt {} of {} to player {}", value_str, suit, player_color);
-                }
+                // Log the dealt card
+                let value_str = match value {
+                    1 => "Ace",
+                    2 => "2",
+                    3 => "3",
+                    4 => "4",
+                    5 => "5",
+                    6 => "6",
+                    7 => "7",
+                    8 => "8",
+                    9 => "9",
+                    10 => "10",
+                    11 => "Jack",
+                    12 => "Queen",
+                    13 => "King",
+                    _ => "Unknown",
+                };
+                log::info!("Dealt {} of {} to player {}", value_str, suit, player_color);
             }
         }
 
@@ -353,10 +351,13 @@ pub fn build_infantry(ctx: &ReducerContext, x: u32, y: u32) -> Result<(), String
     });
 
     log::info!(
-        "Player {} built 1 infantry on tile ({}, {})",
+        "BUILD INFANTRY SUCCESS:\n- Player: {}\n- Tile: ({}, {}) [ID: {}]\n- New troop count: {}\n- Remaining gold: {}",
         player_color,
         x,
-        y
+        y,
+        tile.tile_id,
+        tile.troops + 1,
+        player.gold - 1
     );
     Ok(())
 }
@@ -383,7 +384,6 @@ pub fn build_infantry(ctx: &ReducerContext, x: u32, y: u32) -> Result<(), String
 #[spacetimedb::reducer]
 pub fn attack(ctx: &ReducerContext, from_tile_id: u32, to_tile_id: u32) -> Result<(), String> {
     // Step 1: Retrieve the source and target tiles from the database
-    // Returns error if either tile doesn't exist
     let from_tile = ctx
         .db
         .tile()
@@ -398,7 +398,6 @@ pub fn attack(ctx: &ReducerContext, from_tile_id: u32, to_tile_id: u32) -> Resul
         .ok_or("Destination tile not found")?;
 
     // Step 2: Get the current player's information
-    // Returns error if player not found
     let player = ctx
         .db
         .player()
@@ -419,11 +418,7 @@ pub fn attack(ctx: &ReducerContext, from_tile_id: u32, to_tile_id: u32) -> Resul
     }
 
     // Step 5: Calculate attack power and defense
-    // Each tank counts as 2 attack power
     let attack_power = from_tile.troops + (from_tile.tanks * 2);
-
-    // For unowned tiles, only use NATURAL_DEFENSE
-    // For owned tiles, use troops + (tanks * 2) just like the attacker
     let defense = if to_tile.owner_color.is_none() {
         NATURAL_DEFENSE
     } else {
@@ -435,39 +430,49 @@ pub fn attack(ctx: &ReducerContext, from_tile_id: u32, to_tile_id: u32) -> Resul
         return Err("Attack power must be greater than defense".to_string());
     }
 
-    // Step 7: Calculate losses and remaining troops
-    let total_losses = attack_power - defense;
-
-    // Tanks take losses first, then troops
-    let mut remaining_tanks = from_tile.tanks;
-    let mut remaining_troops = from_tile.troops;
-    let mut losses_remaining = total_losses;
-
-    // First, tanks take losses (each tank absorbs 2 damage)
-    while losses_remaining >= 2 && remaining_tanks > 0 {
-        remaining_tanks -= 1;
-        losses_remaining -= 2;
-    }
-
-    // Then troops take any remaining losses
-    if losses_remaining > 0 {
-        remaining_troops = remaining_troops.saturating_sub(losses_remaining);
-    }
+    // Step 7: Calculate troops to move
+    // Leave 1 troop in source tile, move the rest to target tile
+    let troops_to_move = from_tile.troops - 1;
+    let tanks_to_move = from_tile.tanks;
 
     // Step 8: Update the source tile to leave 1 troop behind
     ctx.db.tile().tile_id().update(Tile {
         troops: 1, // Leave 1 troop in source tile
-        tanks: remaining_tanks,
+        tanks: 0,  // Move all tanks
         ..from_tile
     });
 
-    // Step 9: Update the target tile with new owner and remaining troops
+    // Step 9: Update the target tile with new owner and moved troops
     ctx.db.tile().tile_id().update(Tile {
         owner_color: Some(player_color.clone()),
-        troops: remaining_troops,
-        tanks: from_tile.tanks, // Tanks transfer to the captured tile
+        troops: troops_to_move,
+        tanks: tanks_to_move,
         ..to_tile
     });
+
+    log::info!(
+        "ATTACK SUCCESS:\n- Attacker: {}\n- From: ({}, {}) [ID: {}]\n  - Starting troops: {}\n  - Starting tanks: {}\n  - Troops moved: {}\n  - Tanks moved: {}\n  - Remaining troops: 1\n  - Remaining tanks: 0\n- To: ({}, {}) [ID: {}]\n  - Previous owner: {}\n  - Previous troops: {}\n  - Previous tanks: {}\n  - New owner: {}\n  - Captured troops: {}\n  - Captured tanks: {}\n- Combat Stats:\n  - Attack Power: {}\n  - Defense: {}\n  - Attack Efficiency: {:.2}%",
+        player_color,
+        from_tile.x,
+        from_tile.y,
+        from_tile_id,
+        from_tile.troops,
+        from_tile.tanks,
+        troops_to_move,
+        tanks_to_move,
+        to_tile.x,
+        to_tile.y,
+        to_tile_id,
+        to_tile.owner_color.as_deref().unwrap_or("neutral"),
+        to_tile.troops,
+        to_tile.tanks,
+        player_color,
+        troops_to_move,
+        tanks_to_move,
+        attack_power,
+        defense,
+        (attack_power as f32 / (attack_power + defense) as f32) * 100.0
+    );
 
     Ok(())
 }

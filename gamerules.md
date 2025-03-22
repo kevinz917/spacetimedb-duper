@@ -1,5 +1,61 @@
 # Game Rules
 
+## Tile ID Mappings
+
+The game board uses the following tile IDs for each coordinate (x,y):
+
+```
+(0,0) -> ID: 1
+(0,1) -> ID: 2
+(0,2) -> ID: 3
+(0,3) -> ID: 4
+(0,4) -> ID: 5
+(0,5) -> ID: 6
+(0,6) -> ID: 7
+(1,0) -> ID: 8
+(1,1) -> ID: 9    [Red Player Start]
+(1,2) -> ID: 10
+(1,3) -> ID: 11
+(1,4) -> ID: 12
+(1,5) -> ID: 13
+(1,6) -> ID: 14
+(2,0) -> ID: 15
+(2,1) -> ID: 16
+(2,2) -> ID: 17
+(2,3) -> ID: 18
+(2,4) -> ID: 19
+(2,5) -> ID: 20
+(2,6) -> ID: 21
+(3,0) -> ID: 22
+(3,1) -> ID: 23
+(3,2) -> ID: 24
+(3,3) -> ID: 25    [Purple Player Start]
+(3,4) -> ID: 26
+(3,5) -> ID: 27
+(3,6) -> ID: 28
+(4,0) -> ID: 29
+(4,1) -> ID: 30
+(4,2) -> ID: 31
+(4,3) -> ID: 32
+(4,4) -> ID: 33
+(4,5) -> ID: 34
+(4,6) -> ID: 35
+(5,0) -> ID: 36
+(5,1) -> ID: 37    [Green Player Start]
+(5,2) -> ID: 38
+(5,3) -> ID: 39
+(5,4) -> ID: 40
+(5,5) -> ID: 41    [Orange Player Start]
+(5,6) -> ID: 42
+(6,0) -> ID: 43
+(6,1) -> ID: 44
+(6,2) -> ID: 45
+(6,3) -> ID: 46
+(6,4) -> ID: 47
+(6,5) -> ID: 48
+(6,6) -> ID: 49
+```
+
 ## Overview
 
 This is a turn-based strategy game where players compete to control territory on a 7x7 grid. Each player starts with a base tile and can expand their territory through various actions.
